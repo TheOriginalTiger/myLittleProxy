@@ -1,0 +1,8 @@
+.stack-work/
+myLittleProxy.cabal
+/bytestring-0.10.10.0
+/Network
+/src
+/test
+/Setup.hs
+/stack.yaml.lock
