@@ -1,60 +1,55 @@
 module Main where
 
+
 import Lib
-import Control.Concurrent (forkFinally)
-import qualified Control.Exception as E
-import Control.Monad (unless, forever, void)
-import qualified Data.ByteString as S
-import Network.Socket
-import Network.Socket.ByteString (recv, sendAll)
+import Control.Monad
 import qualified Data.ByteString.Char8 as C
+import Network.HTTP
+import Network.Socket
+import Network.URI
+import Network.DNS
+import Data.IP
+import Data.List 
+import Data.List.Split as Split 
 
-{-# LANGUAGE OverloadedStrings #-}
 
-main :: IO ()
-main = runTCPServer Nothing "3000" talk
-  where
-    talk s1 = do
-        msg <- recv s1 1024
-        unless (S.null msg) $ do -- aint doing anything with data yet
-            runTCPClient "127.0.0.1" "3222" $ \s2 -> do
-              sendAll s2 msg
-              message <- recv s2 1024
-              sendAll s1 ((C.pack "from proxy!"))           
-            talk s1
 
--- from the "network-run" package.
-runTCPServer :: Maybe HostName -> ServiceName -> (Socket -> IO a) -> IO a
-runTCPServer mhost port server = withSocketsDo $ do
-    addr <- resolve
-    E.bracket (open addr) close loop
-  where
-    resolve = do
-        let hints = defaultHints {
-                addrFlags = [AI_PASSIVE]
-              , addrSocketType = Stream
-              }
-        head <$> getAddrInfo (Just hints) mhost (Just port)
-    open addr = do
-        sock <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
-        setSocketOption sock ReuseAddr 1
-        withFdSocket sock $ setCloseOnExecIfNeeded
-        bind sock $ addrAddress addr
-        listen sock 1024
-        return sock
-    loop sock = forever $ do
-        (conn, _peer) <- accept sock
-        void $ forkFinally (server conn) (const $ gracefulClose conn 5000)
+parseUrl :: Maybe String-> IO(Either DNSError [IPv4])
+parseUrl Nothing = return $ Left FormatError  
+parseUrl (Just furl) = do 
+                    let u = case findString "//" furl of 
+                              Nothing -> furl 
+                              Just _ -> ("www." ++ (concat $ tail $ Split.splitOn "//" furl))
+                              where
+                                findString search str = findIndex (isPrefixOf search) (tails str)     
+                       
+                    
+                    let host = C.pack u
+                    rs <- makeResolvSeed defaultResolvConf
+                    a <- withResolver rs $ \resolver -> lookupA resolver host
+                    return a -- :D ugly vkoryachka 
 
-runTCPClient :: HostName -> ServiceName -> (Socket -> IO a) -> IO a
-runTCPClient host port client = withSocketsDo $ do
-    addr <- resolve
-    E.bracket (open addr) close client
-  where
-    resolve = do
-        let hints = defaultHints { addrSocketType = Stream }
-        head <$> getAddrInfo (Just hints) (Just host) (Just port)
-    open addr = do
-        sock <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
-        connect sock $ addrAddress addr
-        return sock
+main = do
+  lsock <- socket AF_INET Stream defaultProtocol
+  bind lsock (SockAddrInet 3000 0x0100007f)
+  listen lsock 1
+  forever $ do
+    (csock, _) <- accept lsock
+    hs <- socketConnection "" 3000 csock
+    req <- receiveHTTP hs
+    case req of
+      Left _ -> respondHTTP hs $ (Response (5,0,0) "Internal Server Error" [] "")
+      Right r ->  do
+                    putStrLn "got it !"
+                    let newr = replaceHeader HdrUserAgent "User-Agent: ti/Pidor" r
+                    let url = findHeader HdrHost newr
+                    addr <- parseUrl url 
+                    case addr of 
+                      Left _ -> respondHTTP hs $ (Response (4,0,4) "This site can’t be reached" [] "server IP address could not be found")
+                      Right h -> do                                   
+                                  respondHTTP hs $ (Response (2,0,0) "OK" [] "Hello HTTP")
+
+               
+                    
+                    Network.HTTP.close hs
+
