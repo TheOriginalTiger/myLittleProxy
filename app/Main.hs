@@ -41,14 +41,21 @@ main = do
       Left _ -> respondHTTP hs $ (Response (5,0,0) "Internal Server Error" [] "")
       Right r ->  do
                     putStrLn "got it !"
-                    let newr = replaceHeader HdrUserAgent "User-Agent: ti/Pidor" r
+                    let newr = replaceHeader HdrUserAgent "User-Agent: Mozilla/5.0" r
                     let url = findHeader HdrHost newr
                     addr <- parseUrl url 
                     case addr of 
                       Left _ -> respondHTTP hs $ (Response (4,0,4) "This site can’t be reached" [] "server IP address could not be found")
-                      Right h -> do                                   
-                                  respondHTTP hs $ (Response (2,0,0) "OK" [] "Hello HTTP")
-
+                      Right dnsAdress -> do
+                                  sendingSock <- socket AF_INET Stream defaultProtocol
+                                  connect sendingSock $ SockAddrInet 80 $ toHostAddress $ head dnsAdress 
+                                  handler <- socketConnection "" 2228 sendingSock 
+                                  eresp <- sendHTTP handler newr 
+                                  case eresp of 
+                                    Left _ -> respondHTTP hs $ (Response (5,0,0) "Internal Server Error" [] "")
+                                    Right resp -> respondHTTP hs resp -- $ (Response (2,0,0) "OK" [] "Hello HTTP")
+                                  Network.HTTP.close handler
+                                  close' sendingSock  
                
                     
                     Network.HTTP.close hs
