@@ -19,4 +19,5 @@ urlToDNS (Just furl) = do
                     let host = C.pack u
                     rs <- makeResolvSeed defaultResolvConf
                     withResolver rs $ \resolver -> lookupA resolver host
-                    
+fromDNSToInt :: [IPv4]->Int
+fromDNSToInt addr = foldr (+) 0 (fromIPv4 $ head addr)
